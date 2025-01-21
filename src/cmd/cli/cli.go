@@ -3,8 +3,8 @@ package cli
 import (
 	"flag"
 	"fmt"
-	"password-checker/internal/checker"
-	"password-checker/internal/api"
+	"password-checker/src/internal/checker"
+	"password-checker/src/internal/api"
 )
 
 // RunCLI executes the command-line interface for password checking.

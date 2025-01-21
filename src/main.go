@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"password-checker/internal/checker"
-	"password-checker/internal/api"
+	"password-checker/src/internal/checker"
+	"password-checker/src/internal/api"
 	"strconv"
 )
 
