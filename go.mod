@@ -1,7 +1,3 @@
-module password-checker
+module github.com/vectode/password-checker
 
-go 1.23
-
-require (
-
-)
+go 1.21
