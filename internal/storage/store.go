@@ -28,8 +28,9 @@ type StoredPassword struct {
 
 // FileStore persists passwords on disk using a JSON file.
 type FileStore struct {
-	path string
-	mu   sync.Mutex
+	path     string
+	lockPath string
+	mu       sync.Mutex
 }
 
 // NewFileStore initialises a password store that writes to the provided path.
@@ -48,7 +49,10 @@ func NewFileStore(path string) (PasswordStore, error) {
 		return nil, err
 	}
 
-	return &FileStore{path: trimmed}, nil
+	return &FileStore{
+		path:     trimmed,
+		lockPath: trimmed + ".lock",
+	}, nil
 }
 
 // Save stores or updates a password under the provided label.
@@ -63,6 +67,12 @@ func (s *FileStore) Save(label, password string) (StoredPassword, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	lock, err := s.acquireFileLock()
+	if err != nil {
+		return StoredPassword{}, err
+	}
+	defer s.releaseFileLock(lock)
 
 	entries, err := s.readAll()
 	if err != nil {
@@ -158,6 +168,28 @@ func (s *FileStore) readAll() ([]StoredPassword, error) {
 		return []StoredPassword{}, nil
 	}
 	return payload.Entries, nil
+}
+
+func (s *FileStore) acquireFileLock() (*os.File, error) {
+	for {
+		lockFile, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			return lockFile, nil
+		}
+		if errors.Is(err, os.ErrExist) {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		return nil, fmt.Errorf("failed to acquire storage lock: %w", err)
+	}
+}
+
+func (s *FileStore) releaseFileLock(lockFile *os.File) {
+	if lockFile == nil {
+		return
+	}
+	lockFile.Close()
+	os.Remove(s.lockPath)
 }
 
 func (s *FileStore) writeAll(entries []StoredPassword) error {
