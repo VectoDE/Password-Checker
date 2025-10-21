@@ -170,14 +170,45 @@ func (s *FileStore) readAll() ([]StoredPassword, error) {
 	return payload.Entries, nil
 }
 
+const (
+	lockRetryInterval     = 50 * time.Millisecond
+	lockAcquireTimeout    = 5 * time.Second
+	lockStaleAgeThreshold = 30 * time.Second
+)
+
 func (s *FileStore) acquireFileLock() (*os.File, error) {
+	deadline := time.Now().Add(lockAcquireTimeout)
+
 	for {
 		lockFile, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
+			// Record when the lock was acquired to help with stale detection if the process dies unexpectedly.
+			if _, writeErr := lockFile.WriteString(fmt.Sprintf("%d\n%d", os.Getpid(), time.Now().UnixNano())); writeErr != nil {
+				lockFile.Close()
+				os.Remove(s.lockPath)
+				return nil, fmt.Errorf("failed to write lock metadata: %w", writeErr)
+			}
+			// Ensure the write hits disk so other processes can rely on the metadata.
+			if syncErr := lockFile.Sync(); syncErr != nil {
+				lockFile.Close()
+				os.Remove(s.lockPath)
+				return nil, fmt.Errorf("failed to persist lock metadata: %w", syncErr)
+			}
 			return lockFile, nil
 		}
 		if errors.Is(err, os.ErrExist) {
-			time.Sleep(50 * time.Millisecond)
+			info, statErr := os.Stat(s.lockPath)
+			if statErr == nil {
+				if time.Since(info.ModTime()) > lockStaleAgeThreshold {
+					if removeErr := os.Remove(s.lockPath); removeErr == nil {
+						continue
+					}
+				}
+			}
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("failed to acquire storage lock: timed out waiting for lock")
+			}
+			time.Sleep(lockRetryInterval)
 			continue
 		}
 		return nil, fmt.Errorf("failed to acquire storage lock: %w", err)
