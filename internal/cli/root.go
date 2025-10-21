@@ -57,8 +57,7 @@ func New(service *app.Service, cfg config.Config, logger *slog.Logger) (*CLI, er
 // Run executes the CLI using the provided arguments.
 func (c *CLI) Run(args []string) error {
 	if len(args) == 0 {
-		c.printUsage()
-		return nil
+		return c.runInteractive(nil)
 	}
 
 	switch args[0] {
@@ -68,6 +67,10 @@ func (c *CLI) Run(args []string) error {
 		return c.runGenerate(args[1:])
 	case "interactive":
 		return c.runInteractive(args[1:])
+	case "save":
+		return c.runSave(args[1:])
+	case "list":
+		return c.runList(args[1:])
 	case "--help", "-h":
 		c.printUsage()
 		return nil
@@ -119,7 +122,61 @@ func (c *CLI) runCheck(args []string) error {
 	}
 
 	c.printAssessmentHuman(assessment)
+	return c.promptToSavePassword(pwd)
+}
+
+func (c *CLI) runSave(args []string) error {
+	fs := flag.NewFlagSet("save", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	labelFlag := fs.String("label", "", "Label under which the password should be stored")
+	passwordFlag := fs.String("password", "", "Password to store. If omitted, the password is read from standard input.")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+
+	label := strings.TrimSpace(*labelFlag)
+	if label == "" {
+		return errors.New("label cannot be empty")
+	}
+
+	pwd := strings.TrimSpace(*passwordFlag)
+	if pwd == "" {
+		piped, err := c.readPasswordFromPipe()
+		if err != nil {
+			return err
+		}
+		pwd = piped
+	}
+
+	if pwd == "" {
+		return errors.New("no password provided; use --password or pipe a password to stdin")
+	}
+
+	record, err := c.service.SavePassword(label, pwd)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(c.stdout, "Passwort '%s' gespeichert (%s).\n", record.Label, record.UpdatedAt.Format(time.RFC1123))
 	return nil
+}
+
+func (c *CLI) runList(args []string) error {
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+
+	return c.printStoredPasswords()
 }
 
 func (c *CLI) runGenerate(args []string) error {
@@ -144,7 +201,7 @@ func (c *CLI) runGenerate(args []string) error {
 		return err
 	}
 	fmt.Fprintln(c.stdout, password)
-	return nil
+	return c.promptToSavePassword(password)
 }
 
 func (c *CLI) runInteractive(args []string) error {
@@ -153,12 +210,15 @@ func (c *CLI) runInteractive(args []string) error {
 	}
 
 	reader := bufio.NewReader(c.stdin)
-	for attempts := 0; attempts < c.cfg.CLI.MaxPromptRetries; attempts++ {
+	invalidAttempts := 0
+	for {
 		fmt.Fprintln(c.stdout, "=== Password Checker ===")
 		fmt.Fprintln(c.stdout, "1. Prüfe ein Passwort")
 		fmt.Fprintln(c.stdout, "2. Generiere ein Passwort")
-		fmt.Fprintln(c.stdout, "3. Beenden")
-		fmt.Fprint(c.stdout, "Auswahl (1-3): ")
+		fmt.Fprintln(c.stdout, "3. Passwort speichern")
+		fmt.Fprintln(c.stdout, "4. Gespeicherte Passwörter anzeigen")
+		fmt.Fprintln(c.stdout, "5. Beenden")
+		fmt.Fprint(c.stdout, "Auswahl (1-5): ")
 
 		choice, err := reader.ReadString('\n')
 		if err != nil {
@@ -168,6 +228,7 @@ func (c *CLI) runInteractive(args []string) error {
 
 		switch choice {
 		case "1":
+			invalidAttempts = 0
 			fmt.Fprint(c.stdout, "Passwort eingeben: ")
 			pwd, err := reader.ReadString('\n')
 			if err != nil {
@@ -182,7 +243,11 @@ func (c *CLI) runInteractive(args []string) error {
 				return err
 			}
 			c.printAssessmentHuman(assessment)
+			if err := c.promptToSavePasswordInteractive(reader, pwd); err != nil {
+				return err
+			}
 		case "2":
+			invalidAttempts = 0
 			fmt.Fprintf(c.stdout, "Bit-Stärke (Standard %d): ", c.cfg.Generator.DefaultBits)
 			input, err := reader.ReadString('\n')
 			if err != nil {
@@ -207,14 +272,32 @@ func (c *CLI) runInteractive(args []string) error {
 				return err
 			}
 			fmt.Fprintf(c.stdout, "Generiertes Passwort: %s\n", password)
+			if err := c.promptToSavePasswordInteractive(reader, password); err != nil {
+				return err
+			}
 		case "3":
+			invalidAttempts = 0
+			if err := c.handleManualSave(reader); err != nil {
+				return err
+			}
+		case "4":
+			invalidAttempts = 0
+			if err := c.printStoredPasswords(); err != nil {
+				return err
+			}
+		case "5":
 			fmt.Fprintln(c.stdout, "Auf Wiedersehen!")
 			return nil
 		default:
 			fmt.Fprintln(c.stdout, "Ungültige Auswahl. Bitte erneut versuchen.")
+			invalidAttempts++
+			if invalidAttempts >= c.cfg.CLI.MaxPromptRetries {
+				return errors.New("maximale Anzahl an Versuchen überschritten")
+			}
+			continue
 		}
+		invalidAttempts = 0
 	}
-	return errors.New("maximale Anzahl an Versuchen überschritten")
 }
 
 func (c *CLI) printUsage() {
@@ -225,6 +308,8 @@ func (c *CLI) printUsage() {
 	fmt.Fprintln(c.stdout, "Commands:")
 	fmt.Fprintln(c.stdout, "  check        Evaluate a password for strength and breaches")
 	fmt.Fprintln(c.stdout, "  generate     Generate a secure password")
+	fmt.Fprintln(c.stdout, "  save         Persist a password with a label")
+	fmt.Fprintln(c.stdout, "  list         Display stored passwords")
 	fmt.Fprintln(c.stdout, "  interactive  Launch the interactive mode")
 	fmt.Fprintln(c.stdout, "  --version    Print the application version")
 	fmt.Fprintln(c.stdout, "  --help       Show this help message")
@@ -279,4 +364,117 @@ func (c *CLI) readPasswordFromPipe() (string, error) {
 	}
 
 	return strings.TrimSpace(string(data)), nil
+}
+
+func (c *CLI) promptToSavePassword(password string) error {
+	info, err := c.stdinFile.Stat()
+	if err != nil {
+		return fmt.Errorf("unable to stat stdin: %w", err)
+	}
+	if (info.Mode() & os.ModeCharDevice) == 0 {
+		// Non-interactive context; do not prompt.
+		return nil
+	}
+
+	reader := bufio.NewReader(c.stdin)
+	return c.promptToSavePasswordInteractive(reader, password)
+}
+
+func (c *CLI) promptToSavePasswordInteractive(reader *bufio.Reader, password string) error {
+	if password == "" {
+		return nil
+	}
+
+	decision, err := c.askYesNo(reader, "Passwort speichern? (j/n): ")
+	if err != nil {
+		return err
+	}
+	if !decision {
+		return nil
+	}
+
+	fmt.Fprint(c.stdout, "Bezeichnung: ")
+	label, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		fmt.Fprintln(c.stdout, "Leere Bezeichnung – Passwort wurde nicht gespeichert.")
+		return nil
+	}
+
+	record, err := c.service.SavePassword(label, password)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stdout, "Passwort gespeichert unter '%s'.\n", record.Label)
+	return nil
+}
+
+func (c *CLI) handleManualSave(reader *bufio.Reader) error {
+	fmt.Fprint(c.stdout, "Bezeichnung: ")
+	label, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		fmt.Fprintln(c.stdout, "Leere Bezeichnung – Vorgang abgebrochen.")
+		return nil
+	}
+
+	fmt.Fprint(c.stdout, "Passwort: ")
+	pwd, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	pwd = strings.TrimSpace(pwd)
+	if pwd == "" {
+		fmt.Fprintln(c.stdout, "Leeres Passwort – Vorgang abgebrochen.")
+		return nil
+	}
+
+	record, err := c.service.SavePassword(label, pwd)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stdout, "Passwort gespeichert unter '%s'.\n", record.Label)
+	return nil
+}
+
+func (c *CLI) printStoredPasswords() error {
+	entries, err := c.service.ListSavedPasswords()
+	if err != nil {
+		return err
+	}
+
+	if len(entries) == 0 {
+		fmt.Fprintln(c.stdout, "Keine gespeicherten Passwörter vorhanden.")
+		return nil
+	}
+
+	fmt.Fprintln(c.stdout, "Gespeicherte Passwörter:")
+	for _, entry := range entries {
+		fmt.Fprintf(c.stdout, "- %s: %s (zuletzt aktualisiert %s)\n", entry.Label, entry.Password, entry.UpdatedAt.Format(time.RFC1123))
+	}
+	return nil
+}
+
+func (c *CLI) askYesNo(reader *bufio.Reader, prompt string) (bool, error) {
+	fmt.Fprint(c.stdout, prompt)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	switch response {
+	case "j", "ja", "y", "yes":
+		return true, nil
+	case "n", "nein", "no":
+		return false, nil
+	default:
+		fmt.Fprintln(c.stdout, "Ungültige Eingabe. Bitte 'j' oder 'n' eingeben.")
+		return c.askYesNo(reader, prompt)
+	}
 }

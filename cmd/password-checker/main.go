@@ -9,6 +9,7 @@ import (
 	"github.com/vectode/password-checker/internal/config"
 	"github.com/vectode/password-checker/internal/password"
 	"github.com/vectode/password-checker/internal/pwned"
+	"github.com/vectode/password-checker/internal/storage"
 )
 
 func main() {
@@ -42,7 +43,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	service, err := app.NewService(evaluator, generator, breachClient)
+	passwordStore, err := storage.NewFileStore(cfg.Storage.Path)
+	if err != nil {
+		logger.Error("failed to create password store", "error", err)
+		os.Exit(1)
+	}
+
+	service, err := app.NewService(evaluator, generator, breachClient, passwordStore)
 	if err != nil {
 		logger.Error("failed to create service", "error", err)
 		os.Exit(1)

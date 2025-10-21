@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ const (
 	envGeneratorMinLength = "GENERATOR_MIN_LENGTH"
 	envGeneratorBits      = "GENERATOR_DEFAULT_BITS"
 	envCLImaxRetries      = "CLI_MAX_PROMPT_RETRIES"
+	envStoragePath        = "PASSWORD_STORE_PATH"
 )
 
 // Config captures all runtime configuration used by the application.
@@ -24,6 +26,7 @@ type Config struct {
 	Generator GeneratorConfig
 	PwnedAPI  PwnedAPIConfig
 	CLI       CLIConfig
+	Storage   StorageConfig
 }
 
 // PasswordConfig defines the runtime password policy.
@@ -49,6 +52,11 @@ type PwnedAPIConfig struct {
 // CLIConfig controls behaviour for the interactive CLI.
 type CLIConfig struct {
 	MaxPromptRetries int
+}
+
+// StorageConfig defines persistence options for saved passwords.
+type StorageConfig struct {
+	Path string
 }
 
 const (
@@ -82,6 +90,9 @@ func Load() (Config, error) {
 		},
 		CLI: CLIConfig{
 			MaxPromptRetries: defaultCLIMaxRetries,
+		},
+		Storage: StorageConfig{
+			Path: defaultStoragePath(),
 		},
 	}
 
@@ -133,5 +144,19 @@ func Load() (Config, error) {
 		cfg.CLI.MaxPromptRetries = retries
 	}
 
+	if storagePath := strings.TrimSpace(os.Getenv(envStoragePath)); storagePath != "" {
+		if filepath.Clean(storagePath) == "." {
+			return Config{}, fmt.Errorf("invalid %s value: %s", envStoragePath, storagePath)
+		}
+		cfg.Storage.Path = storagePath
+	}
+
 	return cfg, nil
+}
+
+func defaultStoragePath() string {
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".password-checker", "passwords.json")
+	}
+	return "passwords.json"
 }
