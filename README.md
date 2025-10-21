@@ -7,6 +7,7 @@ Password Checker is a production-ready Go CLI that validates password strength, 
 - **Deterministic Policy Enforcement** – Centralised password policy validation with detailed findings that highlight improvement areas.
 - **HIBP Integration** – Secure k-anonymity implementation to query the official HIBP password range API with rate-limit handling.
 - **Secure Password Generator** – Cryptographically secure password generator that guarantees character set coverage and configurable entropy targets.
+- **Local Password Vault** – Persist generated or validated passwords locally with simple retrieval commands.
 - **Enterprise-Grade CLI** – Structured sub-commands (`check`, `generate`, `interactive`) with JSON or human-readable output options.
 - **Configuration & Observability** – Robust environment-based configuration, sensible defaults, and structured logging through Go's `slog` package.
 - **Automated Quality Gates** – Unit tests covering critical domains (policy, generator, and API client) ensure confidence in production deployments.
@@ -33,7 +34,7 @@ go build ./...
 
 ### Running
 
-The CLI exposes three sub-commands:
+The CLI exposes five sub-commands:
 
 #### 1. Check a password
 
@@ -58,13 +59,29 @@ printf "Sup3r$ecret!" | ./password-checker check
 ./password-checker generate --bits 192
 ```
 
-#### 3. Interactive mode
+#### 3. Save a password
+
+```bash
+# Store a password under a custom label
+./password-checker save --label "mail" --password "Sup3r$ecret!"
+
+# Pipe the password value securely
+printf "Sup3r$ecret!" | ./password-checker save --label "mail"
+```
+
+#### 4. List stored passwords
+
+```bash
+./password-checker list
+```
+
+#### 5. Interactive mode
 
 ```bash
 ./password-checker interactive
 ```
 
-The interactive mode is available in German and guides users through evaluation and generation flows.
+Starting the binary without arguments launches the interactive mode automatically. The interactive mode is available in German and guides users through evaluation, generation, and password vault flows.
 
 ## Configuration
 

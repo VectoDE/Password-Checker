@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/vectode/password-checker/internal/password"
+	"github.com/vectode/password-checker/internal/storage"
 )
 
 // BreachChecker defines an interface capable of checking whether a password has appeared in a breach.
@@ -27,10 +28,11 @@ type Service struct {
 	evaluator StrengthEvaluator
 	generator PasswordGenerator
 	breach    BreachChecker
+	store     storage.PasswordStore
 }
 
 // NewService constructs a service instance.
-func NewService(evaluator StrengthEvaluator, generator PasswordGenerator, breach BreachChecker) (*Service, error) {
+func NewService(evaluator StrengthEvaluator, generator PasswordGenerator, breach BreachChecker, store storage.PasswordStore) (*Service, error) {
 	if evaluator == nil {
 		return nil, errors.New("evaluator cannot be nil")
 	}
@@ -40,10 +42,14 @@ func NewService(evaluator StrengthEvaluator, generator PasswordGenerator, breach
 	if breach == nil {
 		return nil, errors.New("breach checker cannot be nil")
 	}
+	if store == nil {
+		return nil, errors.New("password store cannot be nil")
+	}
 	return &Service{
 		evaluator: evaluator,
 		generator: generator,
 		breach:    breach,
+		store:     store,
 	}, nil
 }
 
@@ -72,4 +78,14 @@ func (s *Service) EvaluatePassword(ctx context.Context, pwd string) (PasswordAss
 // GeneratePassword produces a secure password at the given bit strength.
 func (s *Service) GeneratePassword(bits int) (string, error) {
 	return s.generator.Generate(bits)
+}
+
+// SavePassword persists a password with the provided label.
+func (s *Service) SavePassword(label, password string) (storage.StoredPassword, error) {
+	return s.store.Save(label, password)
+}
+
+// ListSavedPasswords retrieves all stored passwords.
+func (s *Service) ListSavedPasswords() ([]storage.StoredPassword, error) {
+	return s.store.List()
 }
