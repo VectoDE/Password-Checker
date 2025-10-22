@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -200,8 +201,11 @@ func (s *FileStore) acquireFileLock() (*os.File, error) {
 			info, statErr := os.Stat(s.lockPath)
 			if statErr == nil {
 				if time.Since(info.ModTime()) > lockStaleAgeThreshold {
-					if removeErr := os.Remove(s.lockPath); removeErr == nil {
-						continue
+					stale, determineErr := isLockFileStale(s.lockPath)
+					if determineErr == nil && stale {
+						if removeErr := os.Remove(s.lockPath); removeErr == nil {
+							continue
+						}
 					}
 				}
 			}
@@ -213,6 +217,40 @@ func (s *FileStore) acquireFileLock() (*os.File, error) {
 		}
 		return nil, fmt.Errorf("failed to acquire storage lock: %w", err)
 	}
+}
+
+func isLockFileStale(lockPath string) (bool, error) {
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	contents := strings.SplitN(string(data), "\n", 2)
+	if len(contents) == 0 {
+		return true, nil
+	}
+
+	pidStr := strings.TrimSpace(contents[0])
+	if pidStr == "" {
+		return true, nil
+	}
+
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return true, nil
+	}
+	if pid <= 0 {
+		return true, nil
+	}
+
+	if isProcessRunning(pid) {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func (s *FileStore) releaseFileLock(lockFile *os.File) {
