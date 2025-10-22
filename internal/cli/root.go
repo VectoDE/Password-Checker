@@ -349,12 +349,7 @@ func (c *CLI) printAssessmentHuman(assessment app.PasswordAssessment) {
 }
 
 func (c *CLI) readPasswordFromPipe() (string, error) {
-	info, err := c.stdinFile.Stat()
-	if err != nil {
-		return "", fmt.Errorf("unable to stat stdin: %w", err)
-	}
-
-	if (info.Mode() & os.ModeCharDevice) != 0 {
+	if !c.hasNonInteractiveStdin() {
 		return "", nil
 	}
 
@@ -367,17 +362,40 @@ func (c *CLI) readPasswordFromPipe() (string, error) {
 }
 
 func (c *CLI) promptToSavePassword(password string) error {
-	info, err := c.stdinFile.Stat()
-	if err != nil {
-		return fmt.Errorf("unable to stat stdin: %w", err)
-	}
-	if (info.Mode() & os.ModeCharDevice) == 0 {
+	if !c.stdinIsInteractive() {
 		// Non-interactive context; do not prompt.
 		return nil
 	}
 
 	reader := bufio.NewReader(c.stdin)
 	return c.promptToSavePasswordInteractive(reader, password)
+}
+
+func (c *CLI) stdinIsInteractive() bool {
+	interactive, ok := c.detectStdinInteractivity()
+	if !ok {
+		return false
+	}
+	return interactive
+}
+
+func (c *CLI) hasNonInteractiveStdin() bool {
+	interactive, ok := c.detectStdinInteractivity()
+	if !ok {
+		return false
+	}
+	return !interactive
+}
+
+func (c *CLI) detectStdinInteractivity() (bool, bool) {
+	if c.stdinFile == nil {
+		return false, false
+	}
+	info, err := c.stdinFile.Stat()
+	if err != nil {
+		return false, false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0, true
 }
 
 func (c *CLI) promptToSavePasswordInteractive(reader *bufio.Reader, password string) error {
