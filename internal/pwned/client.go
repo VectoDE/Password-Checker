@@ -17,6 +17,7 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	userAgent  string
+	name       string
 }
 
 // NewClient constructs a Client with the supplied configuration.
@@ -39,6 +40,7 @@ func NewClient(baseURL, userAgent string, timeout time.Duration) (*Client, error
 			Timeout: timeout,
 		},
 		userAgent: userAgent,
+		name:      "Have I Been Pwned",
 	}, nil
 }
 
@@ -94,4 +96,9 @@ func (c *Client) IsBreached(ctx context.Context, password string) (bool, error) 
 	}
 
 	return false, nil
+}
+
+// Name returns the human-friendly identifier of the breach provider.
+func (c *Client) Name() string {
+	return c.name
 }
