@@ -43,13 +43,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	globalDataset, err := pwned.NewGlobalDataset()
+	if err != nil {
+		logger.Error("failed to initialise embedded breach dataset", "error", err)
+		os.Exit(1)
+	}
+
+	breachChecker, err := pwned.NewAggregator(breachClient, globalDataset)
+	if err != nil {
+		logger.Error("failed to aggregate breach providers", "error", err)
+		os.Exit(1)
+	}
+
 	passwordStore, err := storage.NewFileStore(cfg.Storage.Path)
 	if err != nil {
 		logger.Error("failed to create password store", "error", err)
 		os.Exit(1)
 	}
 
-	service, err := app.NewService(evaluator, generator, breachClient, passwordStore)
+	service, err := app.NewService(evaluator, generator, breachChecker, passwordStore)
 	if err != nil {
 		logger.Error("failed to create service", "error", err)
 		os.Exit(1)

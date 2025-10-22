@@ -1,11 +1,11 @@
 # Password Checker
 
-Password Checker is a production-ready Go CLI that validates password strength, checks the Have I Been Pwned (HIBP) breach database, and generates enterprise-grade passwords. The application is architected for maintainability with clear domain boundaries, structured logging, strong configuration defaults, and comprehensive automated tests.
+Password Checker is a production-ready Go CLI that validates password strength, checks the Have I Been Pwned (HIBP) breach database, correlates official offline breach datasets, and generates enterprise-grade passwords. The application is architected for maintainability with clear domain boundaries, structured logging, strong configuration defaults, and comprehensive automated tests.
 
 ## Features
 
 - **Deterministic Policy Enforcement** – Centralised password policy validation with detailed findings that highlight improvement areas.
-- **HIBP Integration** – Secure k-anonymity implementation to query the official HIBP password range API with rate-limit handling.
+- **Global Leak Coverage** – Aggregates the official HIBP password range API with curated governmental leak datasets to flag compromised credentials worldwide.
 - **Secure Password Generator** – Cryptographically secure password generator that guarantees character set coverage and configurable entropy targets.
 - **Local Password Vault** – Persist generated or validated passwords locally with simple retrieval commands.
 - **Enterprise-Grade CLI** – Structured sub-commands (`check`, `generate`, `interactive`) with JSON or human-readable output options.
